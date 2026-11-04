@@ -34,6 +34,9 @@
   #overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); backdrop-filter:blur(3px);
              display:flex; align-items:center; justify-content:center; padding:16px; }
   #overlay.hidden { display:none; }
+  #popup { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.55); display:flex;
+           align-items:center; justify-content:center; padding:16px; }
+  #popup.hidden { display:none; }
   .modal { width:min(560px,100%); max-height:92vh; overflow:auto; background:var(--panel);
            border:1px solid var(--line); border-radius:16px; padding:24px; }
   .modal h2 { margin:0 0 4px; font-size:20px; }
@@ -79,6 +82,9 @@
 
 <!-- Foreground: the gate. Content of #modal is re-rendered by render() for every step. -->
 <div id="overlay"><div class="modal" id="modal"></div></div>
+
+<!-- Popup layer for the photo upload; shown by openPhotoPopup(). -->
+<div id="popup" class="hidden"></div>
 
 <script>
 /* ---------- Content ---------- */
@@ -164,7 +170,6 @@ function renderAge() {
   return `<p style="font-size:14px;color:var(--muted)">Enter your date of birth.</p>
     <input type="date" id="dob" max="${new Date().toISOString().slice(0,10)}">
     <div class="msg" id="amsg"></div>
-    <div id="minor"></div>
     <button id="go" disabled>Continue</button>`;
 }
 function ageFrom(dobStr) {
@@ -175,40 +180,55 @@ function ageFrom(dobStr) {
 }
 function bindAge() {
   const go = $("go");
+  let age = null;  // age computed from the date of birth, used when Continue is clicked
   $("dob").onchange = () => {
-    const age = ageFrom($("dob").value);
-    $("minor").innerHTML = ""; go.disabled = true; go.textContent = "Continue"; go.className = "";
+    age = ageFrom($("dob").value);
+    go.disabled = true;
     if (age < 13) {
-      // Hard block under 13, as stated in the terms. No photo step is shown.
+      // Hard block under 13, as stated in the terms. The photo popup never opens.
       $("amsg").className = "msg bad";
       $("amsg").textContent = "Sorry, you must be at least 13 to use this service.";
       return;
     }
-    // Everyone 13+ must now add an ID photo and a face photo. Why: the demo shows the
-    // verification step for all users; the file is only previewed locally, never uploaded.
     $("amsg").className = "msg " + (age >= 18 ? "ok" : "bad");
-    $("amsg").textContent = age >= 18 ? "Age requirement met. Please verify your identity."
+    $("amsg").textContent = age >= 18 ? "Age requirement met."
                                       : "Under 18: identity verification is required.";
-    $("minor").innerHTML = `
-      <div class="upload">1. Photo of your ID document<br><input type="file" accept="image/*" id="idf"><img id="idp" hidden></div>
-      <div class="upload">2. Photo of your face (selfie)<br><input type="file" accept="image/*" capture="user" id="faf"><img id="fap" hidden></div>`;
-    const check = () => go.disabled = !(idPhoto && facePhoto);
-    const hook = (inp, img, set) => $(inp).onchange = (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      const url = URL.createObjectURL(f); set(url);
-      $(img).src = url; $(img).hidden = false; check();
-    };
-    idPhoto = facePhoto = null;
-    hook("idf", "idp", u => idPhoto = u); hook("faf", "fap", u => facePhoto = u);
-    go.textContent = "Submit for verification";
+    go.disabled = false;
   };
-  go.onclick = () => {
-    if ($("minor").innerHTML) {
-      // Fake verification: timed spinner, always passes. No data leaves the browser.
-      $("modal").innerHTML = `<h2>Verifying...</h2><div class="spinner"></div>
-        <p style="text-align:center;color:var(--muted);font-size:14px">Checking your documents (simulated).</p>`;
-      setTimeout(() => { step = 3; render(); }, 2500);
-    } else { step = 3; render(); }
+  // Why a popup: the photo request should feel like a separate, deliberate action.
+  go.onclick = () => openPhotoPopup();
+}
+
+/* Popup (second layer above the main modal) asking for the ID photo and the face photo.
+   Files are only previewed locally via object URLs; nothing is uploaded or checked. */
+function openPhotoPopup() {
+  idPhoto = facePhoto = null;
+  $("popup").innerHTML = `<div class="modal" style="width:min(460px,100%)">
+    <h2>Identity verification</h2>
+    <div class="step-label">Upload both photos to continue</div>
+    <div class="upload">1. Photo of your ID document<br><input type="file" accept="image/*" id="idf"><img id="idp" hidden></div>
+    <div class="upload">2. Photo of your face (selfie)<br><input type="file" accept="image/*" capture="user" id="faf"><img id="fap" hidden></div>
+    <button id="verify" disabled>Submit for verification</button>
+    <button class="ghost" id="cancel">Cancel</button>
+    <div class="demo-tag">Demo only - nothing is checked or stored.</div></div>`;
+  $("popup").classList.remove("hidden");
+
+  // Enable the submit button only when both photos are present.
+  const check = () => $("verify").disabled = !(idPhoto && facePhoto);
+  const hook = (inp, img, set) => $(inp).onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const url = URL.createObjectURL(f); set(url);
+    $(img).src = url; $(img).hidden = false; check();
+  };
+  hook("idf", "idp", u => idPhoto = u);
+  hook("faf", "fap", u => facePhoto = u);
+
+  $("cancel").onclick = () => $("popup").classList.add("hidden");
+  $("verify").onclick = () => {
+    // Fake verification: timed spinner that always approves, since the date of birth was valid.
+    $("popup").innerHTML = `<div class="modal" style="width:min(460px,100%)"><h2>Verifying...</h2><div class="spinner"></div>
+      <p style="text-align:center;color:var(--muted);font-size:14px">Checking your documents (simulated).</p></div>`;
+    setTimeout(() => { $("popup").classList.add("hidden"); step = 3; render(); }, 2500);
   };
 }
 
