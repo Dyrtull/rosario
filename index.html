@@ -1,0 +1,227 @@
+<!doctype html>
+<!--
+  Terms & Conditions gate - DEMO ONLY.
+  What it does: shows a ChatGPT-style chat UI in the background and a modal on top that
+  walks the user through 4 steps: (1) read and accept terms, (2) a short comprehension quiz,
+  (3) date of birth, with an ID photo + face photo step for users under 18, (4) success.
+  How it fits in: single self-contained file (HTML + CSS + JS), no backend, no build step,
+  so it can be deployed to any static host. Nothing is checked or uploaded: photos are only
+  previewed in the browser and the "verification" is a timed animation.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms Gate Demo</title>
+<style>
+  /* Colour tokens in one place so the theme is easy to change. */
+  :root { --bg:#212121; --side:#171717; --panel:#2f2f2f; --text:#ececec; --muted:#9b9b9b;
+          --line:#424242; --accent:#10a37f; --bad:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--text);
+         font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+
+  /* ---------- Fake ChatGPT background ---------- */
+  aside { width:260px; background:var(--side); padding:16px; display:none; flex-direction:column; gap:8px; }
+  aside div { padding:10px; border-radius:8px; color:var(--muted); font-size:14px; }
+  aside div:first-child { background:var(--panel); color:var(--text); }
+  main { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:16px; }
+  main h1 { font-weight:500; font-size:28px; margin:0; text-align:center; }
+  .prompt { width:min(720px,100%); background:var(--panel); border-radius:28px; padding:16px 22px; color:var(--muted); }
+  @media (min-width:800px){ aside{display:flex;} }
+
+  /* ---------- Modal overlay ---------- */
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); backdrop-filter:blur(3px);
+             display:flex; align-items:center; justify-content:center; padding:16px; }
+  #overlay.hidden { display:none; }
+  .modal { width:min(560px,100%); max-height:92vh; overflow:auto; background:var(--panel);
+           border:1px solid var(--line); border-radius:16px; padding:24px; }
+  .modal h2 { margin:0 0 4px; font-size:20px; }
+  .step-label { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .progress { height:4px; background:var(--line); border-radius:2px; margin-bottom:16px; }
+  .progress i { display:block; height:100%; background:var(--accent); border-radius:2px; transition:width .3s; }
+
+  /* Terms text box: the Accept button stays disabled until it is scrolled to the end. */
+  .terms { height:220px; overflow:auto; background:var(--bg); border:1px solid var(--line);
+           border-radius:10px; padding:12px 14px; font-size:14px; line-height:1.5; color:#cfcfcf; }
+  .terms h4 { margin:12px 0 4px; color:var(--text); }
+
+  label.check { display:flex; gap:8px; align-items:flex-start; margin:14px 0; font-size:14px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:999px; padding:11px 20px;
+           font-size:15px; cursor:pointer; width:100%; margin-top:6px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  input[type=date] { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line);
+                     background:var(--bg); color:var(--text); font-size:15px; color-scheme:dark; }
+  .q { margin-bottom:16px; }
+  .q p { margin:0 0 6px; font-weight:500; }
+  .q label { display:block; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+             margin-bottom:6px; cursor:pointer; font-size:14px; }
+  .q label:has(input:checked) { border-color:var(--accent); }
+  .msg { font-size:14px; margin:8px 0; }
+  .msg.bad { color:var(--bad); } .msg.ok { color:var(--accent); }
+  .upload { border:1px dashed var(--line); border-radius:10px; padding:12px; margin-bottom:12px; font-size:14px; }
+  .upload img { display:block; max-width:100%; max-height:140px; margin-top:8px; border-radius:6px; }
+  .spinner { width:36px; height:36px; border:4px solid var(--line); border-top-color:var(--accent);
+             border-radius:50%; animation:spin 1s linear infinite; margin:20px auto; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .demo-tag { text-align:center; color:var(--muted); font-size:12px; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<!-- Background: imitation chat interface, purely decorative. -->
+<aside><div>+ New chat</div><div>Lesson ideas</div><div>Circuit debugging</div><div>Trip planning</div></aside>
+<main>
+  <h1>What can I help with?</h1>
+  <div class="prompt">Ask anything</div>
+</main>
+
+<!-- Foreground: the gate. Content of #modal is re-rendered by render() for every step. -->
+<div id="overlay"><div class="modal" id="modal"></div></div>
+
+<script>
+/* ---------- Content ---------- */
+const TERMS = `
+<h4>1. Acceptance</h4>This is a demonstration text. By using the service you agree to these Terms of Use and to the Privacy Policy.
+<h4>2. Minimum age</h4>You must be at least 18 years old to use the service without supervision. Users aged 13 to 17 may only use the service after identity and age verification and with the consent of a parent or guardian. Users under 13 may not use the service.
+<h4>3. Your content</h4>You keep ownership of what you submit. You grant us a licence to process it in order to operate and improve the service. You are responsible for not submitting unlawful or harmful content.
+<h4>4. Acceptable use</h4>You must not use the service to harm others, to infringe intellectual property, to attempt to break its security, or to generate content that is illegal.
+<h4>5. Accuracy</h4>The service can produce incorrect output. You must verify important information before relying on it. It is not a substitute for professional advice.
+<h4>6. Data retention</h4>Conversations are stored for 30 days for safety review unless you delete them earlier. Verification images, where required, are deleted once the check is complete.
+<h4>7. Termination</h4>We may suspend or end access if these terms are breached. You may stop using the service at any time.
+<h4>8. Changes</h4>We may update these terms. Continued use after an update means you accept the new version.
+<p>End of terms.</p>`;
+
+/* Quiz: answer index is the position of the correct option. Questions mirror the terms above
+   so that a user who really scrolled through them can answer. */
+const QUIZ = [
+  { q:"What is the minimum age to use the service without supervision?", o:["13","16","18"], a:2 },
+  { q:"How long are conversations stored for safety review?", o:["30 days","1 year","Never stored"], a:0 },
+  { q:"What should you do with important information the service gives you?", o:["Trust it fully","Verify it before relying on it","Ignore it"], a:1 },
+];
+
+/* ---------- State ---------- */
+const steps = ["Terms", "Quiz", "Age check", "Done"];
+let step = 0;          // current step index
+let idPhoto = null, facePhoto = null;  // object URLs, used only for the on-page preview
+
+const $ = (id) => document.getElementById(id);
+
+/* Draws the shared header (title, step label, progress bar) then calls the step's own renderer. */
+function render() {
+  const body = [renderTerms, renderQuiz, renderAge, renderDone][step]();
+  $("modal").innerHTML = `
+    <h2>${["Terms of Use","Quick check","Verify your age","You're in"][step]}</h2>
+    <div class="step-label">Step ${step+1} of ${steps.length} - ${steps[step]}</div>
+    <div class="progress"><i style="width:${(step+1)/steps.length*100}%"></i></div>
+    ${body}
+    <div class="demo-tag">Demo only - nothing is checked or stored.</div>`;
+  [bindTerms, bindQuiz, bindAge, () => {}][step]();
+}
+
+/* ---------- Step 1: terms ---------- */
+function renderTerms() {
+  return `<div class="terms" id="terms">${TERMS}</div>
+    <label class="check"><input type="checkbox" id="agree" disabled> I have read and accept the Terms of Use</label>
+    <div class="msg" id="hint" style="color:var(--muted)">Scroll to the end of the terms to continue.</div>
+    <button id="next" disabled>Accept and continue</button>`;
+}
+function bindTerms() {
+  const box = $("terms");
+  // Why: clicking "Accept" alone is not enough, so the checkbox only unlocks at the bottom.
+  box.addEventListener("scroll", () => {
+    if (box.scrollTop + box.clientHeight >= box.scrollHeight - 4) {
+      $("agree").disabled = false; $("hint").textContent = "";
+    }
+  });
+  $("agree").onchange = () => $("next").disabled = !$("agree").checked;
+  $("next").onclick = () => { step = 1; render(); };
+}
+
+/* ---------- Step 2: quiz ---------- */
+function renderQuiz() {
+  const qs = QUIZ.map((x, i) => `<div class="q"><p>${i+1}. ${x.q}</p>` +
+    x.o.map((o, j) => `<label><input type="radio" name="q${i}" value="${j}"> ${o}</label>`).join("") + `</div>`).join("");
+  return `<p style="font-size:14px;color:var(--muted)">Answer all questions correctly to show you read the terms.</p>
+    ${qs}<div class="msg" id="qmsg"></div><button id="check">Submit answers</button>`;
+}
+function bindQuiz() {
+  $("check").onclick = () => {
+    const wrong = QUIZ.filter((x, i) => {
+      const sel = document.querySelector(`input[name=q${i}]:checked`);
+      return !sel || Number(sel.value) !== x.a;
+    }).length;
+    if (wrong === 0) { step = 2; render(); }
+    else { $("qmsg").className = "msg bad";
+           $("qmsg").textContent = `${wrong} answer(s) wrong or missing. Re-read the terms and try again.`;
+           $("check").textContent = "Try again"; }
+  };
+}
+
+/* ---------- Step 3: age check ---------- */
+function renderAge() {
+  return `<p style="font-size:14px;color:var(--muted)">Enter your date of birth.</p>
+    <input type="date" id="dob" max="${new Date().toISOString().slice(0,10)}">
+    <div class="msg" id="amsg"></div>
+    <div id="minor"></div>
+    <button id="go" disabled>Continue</button>`;
+}
+function ageFrom(dobStr) {
+  const d = new Date(dobStr), t = new Date();
+  let age = t.getFullYear() - d.getFullYear();
+  if (t < new Date(t.getFullYear(), d.getMonth(), d.getDate())) age--;  // birthday not reached yet
+  return age;
+}
+function bindAge() {
+  const go = $("go");
+  $("dob").onchange = () => {
+    const age = ageFrom($("dob").value);
+    $("minor").innerHTML = ""; go.disabled = true; go.textContent = "Continue"; go.className = "";
+    if (age >= 18) { $("amsg").className = "msg ok"; $("amsg").textContent = "Age requirement met."; go.disabled = false; }
+    else if (age < 13) {
+      // Hard block under 13, as stated in the terms.
+      $("amsg").className = "msg bad";
+      $("amsg").textContent = "Sorry, you must be at least 13 to use this service.";
+    } else {
+      // 13-17: restricted, needs ID photo + face photo (demo: file is only previewed locally).
+      $("amsg").className = "msg bad";
+      $("amsg").textContent = "Under 18: identity verification is required.";
+      $("minor").innerHTML = `
+        <div class="upload">1. Photo of your ID document<br><input type="file" accept="image/*" id="idf"><img id="idp" hidden></div>
+        <div class="upload">2. Photo of your face (selfie)<br><input type="file" accept="image/*" capture="user" id="faf"><img id="fap" hidden></div>`;
+      const check = () => go.disabled = !(idPhoto && facePhoto);
+      const hook = (inp, img, set) => $(inp).onchange = (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const url = URL.createObjectURL(f); set(url);
+        $(img).src = url; $(img).hidden = false; check();
+      };
+      idPhoto = facePhoto = null;
+      hook("idf", "idp", u => idPhoto = u); hook("faf", "fap", u => facePhoto = u);
+      go.textContent = "Submit for verification";
+    }
+  };
+  go.onclick = () => {
+    if ($("minor").innerHTML) {
+      // Fake verification: timed spinner, always passes. No data leaves the browser.
+      $("modal").innerHTML = `<h2>Verifying...</h2><div class="spinner"></div>
+        <p style="text-align:center;color:var(--muted);font-size:14px">Checking your documents (simulated).</p>`;
+      setTimeout(() => { step = 3; render(); }, 2500);
+    } else { step = 3; render(); }
+  };
+}
+
+/* ---------- Step 4: done ---------- */
+function renderDone() {
+  return `<p>Thanks. You accepted the terms, passed the quiz and completed the age check.</p>
+    <button id="enter">Start chatting</button><button class="ghost" id="again">Restart demo</button>`;
+}
+$("overlay").addEventListener("click", (e) => {
+  if (e.target.id === "enter") $("overlay").classList.add("hidden");
+  if (e.target.id === "again") { step = 0; render(); }
+});
+
+render();
+</script>
+</body>
+</html>
