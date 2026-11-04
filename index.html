@@ -178,28 +178,29 @@ function bindAge() {
   $("dob").onchange = () => {
     const age = ageFrom($("dob").value);
     $("minor").innerHTML = ""; go.disabled = true; go.textContent = "Continue"; go.className = "";
-    if (age >= 18) { $("amsg").className = "msg ok"; $("amsg").textContent = "Age requirement met."; go.disabled = false; }
-    else if (age < 13) {
-      // Hard block under 13, as stated in the terms.
+    if (age < 13) {
+      // Hard block under 13, as stated in the terms. No photo step is shown.
       $("amsg").className = "msg bad";
       $("amsg").textContent = "Sorry, you must be at least 13 to use this service.";
-    } else {
-      // 13-17: restricted, needs ID photo + face photo (demo: file is only previewed locally).
-      $("amsg").className = "msg bad";
-      $("amsg").textContent = "Under 18: identity verification is required.";
-      $("minor").innerHTML = `
-        <div class="upload">1. Photo of your ID document<br><input type="file" accept="image/*" id="idf"><img id="idp" hidden></div>
-        <div class="upload">2. Photo of your face (selfie)<br><input type="file" accept="image/*" capture="user" id="faf"><img id="fap" hidden></div>`;
-      const check = () => go.disabled = !(idPhoto && facePhoto);
-      const hook = (inp, img, set) => $(inp).onchange = (e) => {
-        const f = e.target.files[0]; if (!f) return;
-        const url = URL.createObjectURL(f); set(url);
-        $(img).src = url; $(img).hidden = false; check();
-      };
-      idPhoto = facePhoto = null;
-      hook("idf", "idp", u => idPhoto = u); hook("faf", "fap", u => facePhoto = u);
-      go.textContent = "Submit for verification";
+      return;
     }
+    // Everyone 13+ must now add an ID photo and a face photo. Why: the demo shows the
+    // verification step for all users; the file is only previewed locally, never uploaded.
+    $("amsg").className = "msg " + (age >= 18 ? "ok" : "bad");
+    $("amsg").textContent = age >= 18 ? "Age requirement met. Please verify your identity."
+                                      : "Under 18: identity verification is required.";
+    $("minor").innerHTML = `
+      <div class="upload">1. Photo of your ID document<br><input type="file" accept="image/*" id="idf"><img id="idp" hidden></div>
+      <div class="upload">2. Photo of your face (selfie)<br><input type="file" accept="image/*" capture="user" id="faf"><img id="fap" hidden></div>`;
+    const check = () => go.disabled = !(idPhoto && facePhoto);
+    const hook = (inp, img, set) => $(inp).onchange = (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const url = URL.createObjectURL(f); set(url);
+      $(img).src = url; $(img).hidden = false; check();
+    };
+    idPhoto = facePhoto = null;
+    hook("idf", "idp", u => idPhoto = u); hook("faf", "fap", u => facePhoto = u);
+    go.textContent = "Submit for verification";
   };
   go.onclick = () => {
     if ($("minor").innerHTML) {
